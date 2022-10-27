@@ -1,0 +1,178 @@
+---
+title: 'Practical Machine Learning: Prediction Assignment'
+author: "Kirsten"
+date: "24/10/2022"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(cache = TRUE)
+
+```
+
+#Assignment Outline 
+
+The assessment aims to model the quality of an exercise based on a number of metrics collected from wearably devices. 
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E) (reference: http:/groupware.les.inf.puc-rio.br/har#ixzz4TjsXrJdH )
+
+```{r loadLibrary, include = TRUE}
+## Load required packages 
+library(caret)
+library(randomForest)
+library(rpart.plot)
+library(gbm)
+library(stats)
+library(Metrics)
+
+setwd("C:/Users/kirstend/Desktop/RLearing")
+
+```
+
+```{r setData, include = TRUE}
+## set seed for reproducibility: 
+set.seed(504)
+
+## Load test and training data 
+
+training_data <- read.csv("pml-training.csv")
+testing_data <- read.csv("pml-testing.csv")
+inTrain <- createDataPartition(training_data$classe, p=0.6, list=FALSE)
+myTraining <- training_data[inTrain, ]
+myTesting <- training_data[-inTrain, ]
+
+```
+
+## Cleaning Data
+Having set the seed to insure reroducability, and loading the data, it is clear to see there is some cleaning required. The raw data has 160 variables, of which only some are impacting the classification of the activity. Therefore any columns with a negligible variance, as well as columns with no bearing on the activity were removed. 
+
+```{r Cleaning, include = TRUE}
+# remove variables with nearly zero variance
+nzv <- nearZeroVar(myTraining)
+myTraining <- myTraining[, -nzv]
+myTesting <- myTesting[, -nzv]
+
+# remove variables that are almostly NA
+mostlyNA <- sapply(myTraining, function(x) mean(is.na(x))) > 0.95
+myTraining1 <- myTraining[, mostlyNA==F]
+myTesting <- myTesting[, mostlyNA==F]
+
+# remove identification only variables (columns 1 to 5)
+myTraining <- myTraining1[, -(1:5)]
+myTesting  <- myTesting[, -(1:5)]
+
+myTraining$classe <- factor(myTraining$classe)
+myTesting$classe <- factor(myTesting$classe)
+
+
+```
+
+## Modeling the data: 
+The training data is split into both a training and a test set, to insure cross-validation is applied. The split is on a 60/40 percentage. Thereafter the factor variables are defined and a number of models are trained on the data. The models tested are as follows: 
+
+- Random Forest 
+- Decision Tree 
+- Generalised Boosted Analysis
+- Linear Discriminate Analysis
+
+THe output from the Random forest model can be seen below, with the model returning good accuracy: 
+
+```{r RandF, include = TRUE}
+# Random Forest 
+# randF <- train(classe~.,data= myTraining, method = "rf") # this took too long, so used: 
+randF <- randomForest(classe ~., data = myTraining)
+randF
+
+```
+
+The Decision tree assessment, however, was not as successful, with a much lower accuracy, and a null classification of the activity "classe D": 
+
+```{r decTree, include = TRUE}
+# Decision Tree
+decTree <- train(classe~., data = myTraining, method = "rpart")
+decTree
+rpart.plot(decTree$finalModel)
+```
+
+The Generalised Boosted Analysis model does contain an improved accuracy, however it must be noted that there appear to be a significant number of warnings produced when running this model, under caret, and therefore it was switched across to the GBM library.
+
+```{r GBM, include = TRUE}
+# Generalized Boosted Model (GBM)
+GBM_mod <- gbm(classe~., data = myTraining,  cv.folds = 10, verbose = FALSE)
+GBM_mod
+perf_gbm1 = gbm.perf(GBM_mod, method = "cv")
+
+```
+
+As an addition, a Linear discriminate analysis run, returning a lower accuracy than the random forest: 
+
+```{r LDA, include = TRUE}
+# Linear Discriminate Analysis
+LDA_mod <- train(classe~., myTraining,method = "lda")
+LDA_mod
+
+
+```
+
+## Testing on partitioned Data: 
+
+All the models were then tested on data that had been partitioned into a testing set, returning again that the random forest model maintained a high degree of accuracy. It was considered to combine the two highest scoroign models, the random forest, and the boosted model, however this was found to not significnatly improve the score, therefore it was excluded in the output: 
+
+```{r testing, include = TRUE}
+### Predictions: 
+
+# Prediction using Random forest
+predict_rf <- predict(randF, myTesting, type="class")
+confusionMatrix(myTesting$classe, predict_rf)
+
+# Prediction using Decision tree
+predict_dt <- predict(decTree, myTesting)
+confusionMatrix(myTesting$classe, predict_dt)
+
+# Prediction using GBM
+#predict_GBM <- stats::predict(GBM_mod, myTesting, n.trees = perf_gbm1)
+#rmse_GBM <- rmse(predict_GBM, myTesting$classe)
+#print(rmse_GBM)
+
+# Prediction using LDA
+predict_LDA <- predict(LDA_mod, myTesting)
+confusionMatrix(myTesting$classe, predict_LDA)
+
+# Grouping model for improved performance - this did not improve the performace at all, thus was removed. 
+#predcombo <- data.frame(predict_rf,predict_GBM,classe = myTesting$classe)
+#combModFit <- train(classe ~., method = "gam", data = predcombo)
+#combPredict <- predict(combModFit, predcombo)
+
+```
+
+## Conclusion and final testing: 
+Therefore it was decided to conduct the final prediction on the test data using the random forest model (accuracy = `r confusionMatrix(predict_rf,myTesting$classe)$overall['Accuracy']`): 
+
+```{r final prediction, include = TRUE}
+finalmod <- predict(randF,testing_data)
+
+```
+
+The output returned a 100% correct, having submitted te values in the automated quiz check. 
+
+## References: 
+The work of the following two authors was referenced during the assignment: 
+- https://github.com/vevagm/Practical-Machine-Learning-Course-Project/commit/963ea9a91dd343bd560b8689cdbf8d80de04cbad#diff-827a6befc06430da5ec372b3594cce04affcb80172b848c4287604537f924417
+- https://myhero105.github.io/Coursera-Practical-Machine-Learning-Course-Project/ 
+
+## Appendix: 
+PLots on model comparions below: 
+
+```{r qplot1, include = TRUE}
+qplot(predict_rf,predict_dt,colour = classe, data = myTesting, geom = "jitter")
+```
+
+```{r qplot2, include = TRUE} 
+qplot(predict_dt,predict_LDA,colour = classe, data = myTesting, geom = "jitter")
+```
+
+```{r qplot3, include = TRUE}
+qplot(predict_rf,predict_LDA,colour = classe, data = myTesting, geom = "jitter")
+```
+
+```
